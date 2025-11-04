@@ -86,14 +86,29 @@ class DatabaseManager {
             return false
         }
         
+        // 修复乱码
+        let fixedName = GarbledTextFixer.fix(name)
+        let fixedUrl = GarbledTextFixer.fix(url)
+        let fixedDescription = description.map { GarbledTextFixer.fix($0) }
+        
+        // 规范化 URL 字符串
+        let normalizedUrl = normalizeUrl(fixedUrl)
+        
+        // 检查是否存在相同 URL 的订阅
+        if let existingId = findSubscriptionByUrl(normalizedUrl) {
+            print("🔄 发现相同 URL 的订阅，执行覆盖更新: ID \(existingId)")
+            return updateSubscription(id: existingId, name: fixedName, url: fixedUrl, description: fixedDescription)
+        }
+        
+        // 不存在则插入新记录
         let insertQuery = "INSERT INTO subscriptions (name, url, description) VALUES (?, ?, ?);"
         var statement: OpaquePointer?
         
         let prepareResult = sqlite3_prepare_v2(db, insertQuery, -1, &statement, nil)
         if prepareResult == SQLITE_OK {
-            sqlite3_bind_text(statement, 1, (name as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(statement, 2, (url as NSString).utf8String, -1, nil)
-            if let desc = description {
+            sqlite3_bind_text(statement, 1, (fixedName as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 2, (fixedUrl as NSString).utf8String, -1, nil)
+            if let desc = fixedDescription {
                 sqlite3_bind_text(statement, 3, (desc as NSString).utf8String, -1, nil)
             } else {
                 sqlite3_bind_null(statement, 3)
@@ -101,7 +116,7 @@ class DatabaseManager {
             
             let stepResult = sqlite3_step(statement)
             if stepResult == SQLITE_DONE {
-                print("✅ 添加订阅成功: \(name)")
+                print("✅ 添加订阅成功: \(fixedName)")
                 sqlite3_finalize(statement)
                 return true
             } else {
@@ -120,13 +135,48 @@ class DatabaseManager {
         return false
     }
     
+    private func normalizeUrl(_ urlString: String) -> String {
+        var normalized = urlString.trimmingCharacters(in: .whitespaces).lowercased()
+        
+        // 移除末尾的 /
+        while normalized.hasSuffix("/") {
+            normalized = String(normalized.dropLast())
+        }
+        
+        return normalized
+    }
+    
+    private func findSubscriptionByUrl(_ normalizedUrl: String) -> Int? {
+        guard db != nil else {
+            return nil
+        }
+        
+        let query = "SELECT id, url FROM subscriptions;"
+        var statement: OpaquePointer?
+        
+        let prepareResult = sqlite3_prepare_v2(db, query, -1, &statement, nil)
+        if prepareResult == SQLITE_OK {
+            while sqlite3_step(statement) == SQLITE_ROW {
+                let id = Int(sqlite3_column_int(statement, 0))
+                let url = String(cString: sqlite3_column_text(statement, 1))
+                
+                if normalizeUrl(url) == normalizedUrl {
+                    sqlite3_finalize(statement)
+                    return id
+                }
+            }
+        }
+        sqlite3_finalize(statement)
+        return nil
+    }
+    
     func getAllSubscriptions() -> [Subscription] {
         guard db != nil else {
             print("❌ 数据库未初始化")
             return []
         }
         
-        let query = "SELECT id, name, url, description, created_at, updated_at FROM subscriptions ORDER BY created_at DESC;"
+        let query = "SELECT id, name, url, description, created_at, updated_at FROM subscriptions ORDER BY created_at ASC;"
         var statement: OpaquePointer?
         var subscriptions: [Subscription] = []
         
@@ -134,12 +184,17 @@ class DatabaseManager {
         if prepareResult == SQLITE_OK {
             while sqlite3_step(statement) == SQLITE_ROW {
                 let id = Int(sqlite3_column_int(statement, 0))
-                let name = String(cString: sqlite3_column_text(statement, 1))
-                let url = String(cString: sqlite3_column_text(statement, 2))
+                let rawName = String(cString: sqlite3_column_text(statement, 1))
+                let rawUrl = String(cString: sqlite3_column_text(statement, 2))
+                
+                // 修复乱码
+                let name = GarbledTextFixer.fix(rawName)
+                let url = GarbledTextFixer.fix(rawUrl)
                 
                 let description: String?
                 if let descText = sqlite3_column_text(statement, 3) {
-                    description = String(cString: descText)
+                    let rawDesc = String(cString: descText)
+                    description = GarbledTextFixer.fix(rawDesc)
                 } else {
                     description = nil
                 }
@@ -282,6 +337,50 @@ class DatabaseManager {
         }
         let appDirectory = appSupportURL.appendingPathComponent("CatTool", isDirectory: true)
         return appDirectory.appendingPathComponent("subscriptions.db").path
+    }
+    
+    func fixAllGarbledText() -> (fixed: Int, total: Int) {
+        guard db != nil else {
+            print("❌ 数据库未初始化")
+            return (0, 0)
+        }
+        
+        let query = "SELECT id, name, url, description FROM subscriptions;"
+        var statement: OpaquePointer?
+        var fixedCount = 0
+        var totalCount = 0
+        
+        let prepareResult = sqlite3_prepare_v2(db, query, -1, &statement, nil)
+        if prepareResult == SQLITE_OK {
+            while sqlite3_step(statement) == SQLITE_ROW {
+                totalCount += 1
+                let id = Int(sqlite3_column_int(statement, 0))
+                let rawName = String(cString: sqlite3_column_text(statement, 1))
+                let rawUrl = String(cString: sqlite3_column_text(statement, 2))
+                
+                let fixedName = GarbledTextFixer.fix(rawName)
+                let fixedUrl = GarbledTextFixer.fix(rawUrl)
+                
+                var fixedDesc: String? = nil
+                if let descText = sqlite3_column_text(statement, 3) {
+                    let rawDesc = String(cString: descText)
+                    fixedDesc = GarbledTextFixer.fix(rawDesc)
+                }
+                
+                // 如果有任何字段被修复，更新数据库
+                if fixedName != rawName || fixedUrl != rawUrl || 
+                   (fixedDesc != nil && fixedDesc! != String(cString: sqlite3_column_text(statement, 3))) {
+                    if updateSubscription(id: id, name: fixedName, url: fixedUrl, description: fixedDesc) {
+                        fixedCount += 1
+                        print("✅ 修复记录 ID \(id): \(rawName) -> \(fixedName)")
+                    }
+                }
+            }
+        }
+        sqlite3_finalize(statement)
+        
+        print("📊 乱码修复完成: 修复 \(fixedCount)/\(totalCount) 条记录")
+        return (fixedCount, totalCount)
     }
     
     deinit {

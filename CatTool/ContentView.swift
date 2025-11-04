@@ -10,15 +10,64 @@ struct ContentView: View {
     @State private var searchText = ""
     @StateObject private var connectivityManager = ConnectivityManager.shared
     @State private var isTesting = false
+    @State private var sortBySpeed = false
     
     var filteredSubscriptions: [Subscription] {
+        var filtered: [Subscription]
+        
         if searchText.isEmpty {
-            return subscriptions
+            filtered = subscriptions
+        } else {
+            filtered = subscriptions.filter { sub in
+                sub.name.localizedCaseInsensitiveContains(searchText) ||
+                sub.url.localizedCaseInsensitiveContains(searchText) ||
+                (sub.description?.localizedCaseInsensitiveContains(searchText) ?? false)
+            }
         }
-        return subscriptions.filter { sub in
-            sub.name.localizedCaseInsensitiveContains(searchText) ||
-            sub.url.localizedCaseInsensitiveContains(searchText) ||
-            (sub.description?.localizedCaseInsensitiveContains(searchText) ?? false)
+        
+        // 按速度排序
+        if sortBySpeed {
+            return filtered.sorted { sub1, sub2 in
+                let status1 = connectivityManager.getStatus(for: sub1.id)
+                let status2 = connectivityManager.getStatus(for: sub2.id)
+                
+                // 获取响应时间
+                let time1 = getResponseTime(status1)
+                let time2 = getResponseTime(status2)
+                
+                // 成功的排前面，失败的排后面，未测试的最后
+                if time1 == nil && time2 == nil {
+                    return false // 都未测试，保持原顺序
+                } else if time1 == nil {
+                    return false // sub1 未测试，排后面
+                } else if time2 == nil {
+                    return true // sub2 未测试，sub1 排前面
+                } else if let t1 = time1, let t2 = time2 {
+                    if t1 < 0 && t2 < 0 {
+                        return false // 都失败，保持原顺序
+                    } else if t1 < 0 {
+                        return false // sub1 失败，排后面
+                    } else if t2 < 0 {
+                        return true // sub2 失败，sub1 排前面
+                    } else {
+                        return t1 < t2 // 都成功，响应时间短的排前面
+                    }
+                }
+                return false
+            }
+        }
+        
+        return filtered
+    }
+    
+    private func getResponseTime(_ status: ConnectivityStatus) -> TimeInterval? {
+        switch status {
+        case .success(let time):
+            return time
+        case .failure:
+            return -1 // 失败用负数表示
+        case .unknown, .testing:
+            return nil
         }
     }
     
@@ -37,6 +86,13 @@ struct ContentView: View {
                             .foregroundColor(.secondary)
                     }
                     Spacer()
+                    
+                    Toggle(isOn: $sortBySpeed) {
+                        Image(systemName: "speedometer")
+                    }
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .help("按速度排序")
                     
                     Button {
                         testAllSubscriptions()
@@ -101,15 +157,17 @@ struct ContentView: View {
                     }
                     Spacer()
                 } else {
-                    List(filteredSubscriptions, selection: $selectedSubscription) { subscription in
-                        SubscriptionRow(
-                            subscription: subscription,
-                            status: connectivityManager.getStatus(for: subscription.id),
-                            onOpenInBrowser: {
-                                openInBrowser(subscription.url)
-                            }
-                        )
-                        .tag(subscription)
+                    List(selection: $selectedSubscription) {
+                        ForEach(Array(filteredSubscriptions.enumerated()), id: \.element.id) { index, subscription in
+                            SubscriptionRow(
+                                subscription: subscription,
+                                index: index + 1,
+                                status: connectivityManager.getStatus(for: subscription.id),
+                                onOpenInBrowser: {
+                                    openInBrowser(subscription.url)
+                                }
+                            )
+                            .tag(subscription)
                         .onTapGesture {
                             selectedSubscription = subscription
                         }
@@ -155,6 +213,7 @@ struct ContentView: View {
                             } label: {
                                 Label("删除", systemImage: "trash")
                             }
+                        }
                         }
                     }
                     .listStyle(.inset)
@@ -222,7 +281,11 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showingSettings) {
-            SettingsView()
+            SettingsView {
+                DispatchQueue.main.async {
+                    loadSubscriptions()
+                }
+            }
         }
         .sheet(isPresented: $showingBatchImport) {
             BatchImportView {
@@ -239,10 +302,41 @@ struct ContentView: View {
     private func loadSubscriptions() {
         let loadedData = DatabaseManager.shared.getAllSubscriptions()
         print("🔄 ContentView 加载数据: \(loadedData.count) 条")
+        
+        // 检测并修复乱码
+        var fixedCount = 0
+        for subscription in loadedData {
+            let fixedName = fixGarbledText(subscription.name)
+            let fixedUrl = fixGarbledText(subscription.url)
+            
+            // 如果有乱码被修复，更新数据库
+            if fixedName != subscription.name || fixedUrl != subscription.url {
+                if DatabaseManager.shared.updateSubscription(
+                    id: subscription.id,
+                    name: fixedName,
+                    url: fixedUrl,
+                    description: subscription.description
+                ) {
+                    fixedCount += 1
+                    print("✅ 修复乱码: \(subscription.name) -> \(fixedName)")
+                }
+            }
+        }
+        
+        // 如果有修复，重新加载
+        let finalData = fixedCount > 0 ? DatabaseManager.shared.getAllSubscriptions() : loadedData
+        if fixedCount > 0 {
+            print("🔧 共修复 \(fixedCount) 条乱码记录")
+        }
+        
         DispatchQueue.main.async {
-            self.subscriptions = loadedData
+            self.subscriptions = finalData
             print("🎨 UI 更新完成，当前显示: \(self.subscriptions.count) 条")
         }
+    }
+    
+    private func fixGarbledText(_ text: String) -> String {
+        return GarbledTextFixer.fix(text)
     }
     
     private func deleteSubscription(_ subscription: Subscription) {
@@ -282,15 +376,21 @@ struct ContentView: View {
 
 struct SubscriptionRow: View {
     let subscription: Subscription
+    let index: Int
     let status: ConnectivityStatus
     let onOpenInBrowser: () -> Void
     
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(subscription.name)
-                    .font(.headline)
-                    .foregroundColor(.primary)
+                HStack(spacing: 6) {
+                    Text("\(index).")
+                        .font(.headline)
+                        .foregroundColor(.secondary)
+                    Text(subscription.name)
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                }
                 
                 Text(subscription.url)
                     .font(.caption)
@@ -385,4 +485,5 @@ struct SubscriptionRow: View {
 #Preview {
     ContentView()
 }
+
 

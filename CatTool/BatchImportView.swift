@@ -45,16 +45,22 @@ struct BatchImportView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("使用说明")
                             .font(.headline)
-                        Text("请粘贴订阅列表，每行格式为：")
+                        Text("请粘贴订阅列表，支持以下格式：")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
-                        Text("名称接口：URL 或 名称：URL")
-                            .font(.caption)
-                            .foregroundColor(.blue)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.blue.opacity(0.1))
-                            .cornerRadius(4)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("• 名称接口：URL 或 名称：URL")
+                                .font(.caption)
+                            Text("• URL # 名称 或 URL  # 名称")
+                                .font(.caption)
+                            Text("• JSON 格式：{\"urls\": [{\"name\": \"...\", \"url\": \"...\"}]}")
+                                .font(.caption)
+                        }
+                        .foregroundColor(.blue)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.blue.opacity(0.1))
+                        .cornerRadius(4)
                     }
                     .padding()
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -171,6 +177,71 @@ struct BatchImportView: View {
     }
     
     private func parseImportText(_ text: String) {
+        var items: [ImportItem] = []
+        
+        // 尝试解析 JSON 格式
+        if let jsonItems = parseJSON(text) {
+            items = jsonItems
+        } else {
+            // 按行解析
+            items = parseLineByLine(text)
+        }
+        
+        parsedItems = items
+    }
+    
+    private func parseJSON(_ text: String) -> [ImportItem]? {
+        guard let data = text.data(using: .utf8) else {
+            return nil
+        }
+        
+        do {
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let urls = json["urls"] as? [[String: Any]] {
+                var items: [ImportItem] = []
+                
+                for entry in urls {
+                    guard let name = entry["name"] as? String,
+                          let url = entry["url"] as? String else {
+                        continue
+                    }
+                    
+                    // 修复乱码
+                    let decodedName = GarbledTextFixer.fix(name).trimmingCharacters(in: .whitespaces)
+                    let decodedUrl = GarbledTextFixer.fix(url).trimmingCharacters(in: .whitespaces)
+                    
+                    var isValid = true
+                    var errorMessage: String?
+                    
+                    if decodedName.isEmpty {
+                        isValid = false
+                        errorMessage = "名称为空"
+                    } else if decodedUrl.isEmpty {
+                        isValid = false
+                        errorMessage = "URL为空"
+                    } else if !decodedUrl.lowercased().hasPrefix("http://") && !decodedUrl.lowercased().hasPrefix("https://") {
+                        isValid = false
+                        errorMessage = "URL格式无效（需要http://或https://开头）"
+                    }
+                    
+                    items.append(ImportItem(
+                        name: decodedName,
+                        url: decodedUrl,
+                        isValid: isValid,
+                        errorMessage: errorMessage
+                    ))
+                }
+                
+                return items.isEmpty ? nil : items
+            }
+        } catch {
+            return nil
+        }
+        
+        return nil
+    }
+    
+    private func parseLineByLine(_ text: String) -> [ImportItem] {
         let lines = text.components(separatedBy: .newlines)
         var items: [ImportItem] = []
         
@@ -182,37 +253,67 @@ struct BatchImportView: View {
                 continue
             }
             
-            // 尝试解析格式：名称：URL 或 名称接口：URL
             var name = ""
             var url = ""
             var isValid = true
             var errorMessage: String?
             
-            // 查找冒号分隔符（支持中英文冒号）
-            if let colonRange = trimmedLine.range(of: "：") ?? trimmedLine.range(of: ":") {
-                name = String(trimmedLine[..<colonRange.lowerBound]).trimmingCharacters(in: .whitespaces)
-                url = String(trimmedLine[colonRange.upperBound...]).trimmingCharacters(in: .whitespaces)
+            // 格式1: URL # 名称 (如: http://example.com # 示例)
+            if let hashIndex = trimmedLine.firstIndex(of: "#") {
+                let urlPart = String(trimmedLine[..<hashIndex]).trimmingCharacters(in: .whitespaces)
+                let namePart = String(trimmedLine[trimmedLine.index(after: hashIndex)...]).trimmingCharacters(in: .whitespaces)
                 
-                // 移除名称中的"接口"后缀
-                if name.hasSuffix("接口") {
-                    name = String(name.dropLast(2))
+                // 验证URL部分是否以http://或https://开头
+                if urlPart.lowercased().hasPrefix("http://") || urlPart.lowercased().hasPrefix("https://") {
+                    url = GarbledTextFixer.fix(urlPart)
+                    name = GarbledTextFixer.fix(namePart)
+                    
+                    // 移除名称中的"接口"后缀
+                    if name.hasSuffix("接口") {
+                        name = String(name.dropLast(2))
+                    }
+                    
+                    if name.isEmpty {
+                        isValid = false
+                        errorMessage = "名称为空"
+                    }
+                } else {
+                    // 不是URL格式，尝试其他格式
+                    isValid = false
                 }
-                
-                // 验证
-                if name.isEmpty {
+            }
+            
+            // 格式2: 名称：URL 或 名称接口：URL (如果格式1没有匹配)
+            if !isValid || url.isEmpty {
+                if let colonRange = trimmedLine.range(of: "：") ?? trimmedLine.range(of: ":") {
+                    name = GarbledTextFixer.fix(String(trimmedLine[..<colonRange.lowerBound]).trimmingCharacters(in: .whitespaces))
+                    url = GarbledTextFixer.fix(String(trimmedLine[colonRange.upperBound...]).trimmingCharacters(in: .whitespaces))
+                    
+                    // 移除名称中的"接口"后缀
+                    if name.hasSuffix("接口") {
+                        name = String(name.dropLast(2))
+                    }
+                    
+                    // 验证
+                    if name.isEmpty {
+                        isValid = false
+                        errorMessage = "名称为空"
+                    } else if url.isEmpty {
+                        isValid = false
+                        errorMessage = "URL为空"
+                    } else if !url.lowercased().hasPrefix("http://") && !url.lowercased().hasPrefix("https://") {
+                        isValid = false
+                        errorMessage = "URL格式无效（需要http://或https://开头）"
+                    } else {
+                        isValid = true
+                        errorMessage = nil
+                    }
+                } else if !isValid {
+                    // 两种格式都不匹配
                     isValid = false
-                    errorMessage = "名称为空"
-                } else if url.isEmpty {
-                    isValid = false
-                    errorMessage = "URL为空"
-                } else if !url.lowercased().hasPrefix("http://") && !url.lowercased().hasPrefix("https://") {
-                    isValid = false
-                    errorMessage = "URL格式无效（需要http://或https://开头）"
+                    name = trimmedLine
+                    errorMessage = "格式错误（需要 'URL # 名称' 或 '名称：URL'）"
                 }
-            } else {
-                isValid = false
-                name = trimmedLine
-                errorMessage = "格式错误（缺少冒号分隔符）"
             }
             
             items.append(ImportItem(
@@ -223,7 +324,7 @@ struct BatchImportView: View {
             ))
         }
         
-        parsedItems = items
+        return items
     }
     
     private func performImport() {

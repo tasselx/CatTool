@@ -4,6 +4,11 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showingAlert = false
     @State private var alertMessage = ""
+    let onDataImported: (() -> Void)?
+    
+    init(onDataImported: (() -> Void)? = nil) {
+        self.onDataImported = onDataImported
+    }
     
     var body: some View {
         VStack(spacing: 0) {
@@ -96,6 +101,32 @@ struct SettingsView: View {
                         .padding()
                     }
                     
+                    // 数据修复
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text("数据修复")
+                                .font(.headline)
+                            
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("修复数据库乱码")
+                                        .font(.subheadline)
+                                    Text("修复所有使用 GBK 编码导致的乱码文本")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                Button {
+                                    fixGarbledText()
+                                } label: {
+                                    Label("修复", systemImage: "wrench.and.screwdriver")
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                        .padding()
+                    }
+                    
                     // 关于
                     GroupBox {
                         VStack(alignment: .leading, spacing: 12) {
@@ -170,8 +201,9 @@ struct SettingsView: View {
                 
                 if alert.runModal() == .alertFirstButtonReturn {
                     if DatabaseManager.shared.importDatabase(from: url) {
-                        alertMessage = "导入成功，请重启应用生效"
+                        alertMessage = "导入成功"
                         showingAlert = true
+                        onDataImported?()
                     }
                 }
             }
@@ -185,6 +217,15 @@ struct SettingsView: View {
         }
         let appDirectory = appSupportURL.appendingPathComponent("CatTool", isDirectory: true)
         NSWorkspace.shared.open(appDirectory)
+    }
+    
+    private func fixGarbledText() {
+        let result = DatabaseManager.shared.fixAllGarbledText()
+        alertMessage = "修复完成\n已修复 \(result.fixed) 条记录（共 \(result.total) 条）"
+        showingAlert = true
+        if result.fixed > 0 {
+            onDataImported?()
+        }
     }
 }
 
