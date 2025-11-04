@@ -17,6 +17,7 @@
 		A10000009 /* UniformTypeIdentifiers+Database.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010 /* UniformTypeIdentifiers+Database.swift */; };
 		A10000010 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000011 /* SettingsView.swift */; };
 		A10000011 /* BatchImportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000012 /* BatchImportView.swift */; };
+		A10000012 /* ConnectivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000013 /* ConnectivityManager.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -31,6 +32,8 @@
 		A20000010 /* UniformTypeIdentifiers+Database.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UniformTypeIdentifiers+Database.swift"; sourceTree = "<group>"; };
 		A20000011 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A20000012 /* BatchImportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchImportView.swift; sourceTree = "<group>"; };
+		A20000013 /* ConnectivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectivityManager.swift; sourceTree = "<group>"; };
+		A20000014 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A30000001 /* CatTool.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CatTool.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -63,9 +66,11 @@
 				A20000011 /* SettingsView.swift */,
 				A20000012 /* BatchImportView.swift */,
 				A20000003 /* DatabaseManager.swift */,
+				A20000013 /* ConnectivityManager.swift */,
 				A20000004 /* Subscription.swift */,
 				A20000010 /* UniformTypeIdentifiers+Database.swift */,
 				A20000006 /* Assets.xcassets */,
+				A20000014 /* Info.plist */,
 				A20000007 /* CatTool.entitlements */,
 			);
 			path = CatTool;
@@ -156,6 +161,7 @@
 				A10000009 /* UniformTypeIdentifiers+Database.swift in Sources */,
 				A10000010 /* SettingsView.swift in Sources */,
 				A10000011 /* BatchImportView.swift in Sources */,
+				A10000012 /* ConnectivityManager.swift in Sources */,
 				A10000001 /* CatToolApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -294,7 +300,7 @@
 				DEVELOPMENT_TEAM = 4W2R66YGZA;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = CatTool/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = CatTook;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -324,7 +330,7 @@
 				DEVELOPMENT_TEAM = 4W2R66YGZA;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = CatTool/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = CatTook;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
